@@ -1,4 +1,6 @@
 const Photo = require('../models/photo.model');
+const Voter = require('../models/Voter.model');
+const requestIp = require('request-ip');
 
 /****** SUBMIT PHOTO ********/
 
@@ -19,9 +21,13 @@ exports.add = async (req, res) => {
 			const emailRegex = new RegExp('[a-z0-9]+@[a-z]+.[a-z]{2,3}');
 			const validEmail = email.match(emailRegex);
 
-			const fileName = file.path.split('.').slice(-1)[0]; // cut only filename from full path, e.g. C:/test/abc.jpg -> abc.jpg
+			const fileName = file.path.split('/').slice(-1)[0]; // cut only filename from full path, e.g. C:/test/abc.jpg -> abc.jpg
+			const fileExtension = fileName.path.split('.').slice(-1)[0];
+
 			if (
-				(fileExt === 'jpg' || fileExt === 'png' || fileExt === 'gif') &&
+				(fileExtension === 'jpg' ||
+					fileExtension === 'png' ||
+					fileExtension === 'gif') &&
 				validEmail &&
 				validTitle &&
 				validAuthor
@@ -58,13 +64,30 @@ exports.loadAll = async (req, res) => {
 
 exports.vote = async (req, res) => {
 	try {
-		const photoToUpdate = await Photo.findOne({ _id: req.params.id });
-		if (!photoToUpdate) res.status(404).json({ message: 'Not found' });
-		else {
-			photoToUpdate.votes++;
-			photoToUpdate.save();
-			res.send({ message: 'OK' });
+		const clientIp = requestIp.getClientIp(req);
+		const voter = await Voter.findOne({ user: clientIp });
+		const photoToUpdate = await Photo.findById(req.params.id);
+
+		if (!voter) {
+			const newVoter = new Voter({
+				user: clientIp,
+				votes: [req.params.id],
+			});
+			await newVoter.save();
+		} else {
+			if (voter.votes.includes(req.params.id)) {
+				console.log('already voted');
+				return res.status(500).json({
+					message: 'You have already voted...',
+				});
+			} else {
+				voter.votes.push(req.params.id);
+				photoToUpdate.votes++;
+				await voter.save();
+			}
 		}
+		await photoToUpdate.save();
+		res.send({ message: 'OK' });
 	} catch (err) {
 		res.status(500).json(err);
 	}
